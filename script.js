@@ -1,0 +1,1 @@
+GitHub Pages公開用。products.jsonのstripe_urlへStripe Payment Linkを貼り付けます。

@@ -1,0 +1,11 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>かわのほとりのお花屋</title><link rel="stylesheet" href="style.css"></head><body>
+<header><a href="#top" class="brand"><img src="assets/logo.jpg"><span>かわのほとりのお花屋</span></a><a class="insta" href="https://www.instagram.com/kawano.hotorino.ohanaya/" target="_blank">Instagram</a></header>
+<main id="top"><section class="hero"><div><p class="kicker">DRIED FLOWERS & BOTANICAL MATERIALS</p><h1>暮らしに、<br>そっと寄り添うお花。</h1><p class="lead">自然の表情をそのまま残した、ドライフラワーと花材。ひとつひとつ丁寧に仕立ててお届けします。</p><a class="btn" href="#products">販売中の商品を見る</a></div><div class="hero-art"><img src="assets/mix.jpg"><span>送料込み・一点もの中心</span></div></section>
+<section class="points"><div><b>送料込み</b><small>表示価格のまま購入</small></div><div><b>全国発送</b><small>丁寧に梱包してお届け</small></div><div><b>一点もの</b><small>売り切れ次第終了</small></div></section>
+<section class="shop" id="products"><div class="heading"><span>ONLINE SHOP</span><h2>販売中の商品</h2><p>商品を押すと詳細を確認できます。</p></div><div id="grid" class="grid"></div></section>
+<section class="about"><img src="assets/logo.jpg"><div><p class="kicker">ABOUT</p><h2>かわのほとりのお花屋</h2><p>自然の中で育ったお花を、暮らしに取り入れやすいドライフラワーや花材にしてお届けしています。</p></div></section>
+<section class="guide"><div class="heading"><span>SHOPPING GUIDE</span><h2>ご購入前に</h2></div><details open><summary>発送について</summary><p>商品はやさしく押さえて梱包します。</p></details><details><summary>自然素材について</summary><p>配送中に花や葉が多少落ちる場合があります。</p></details><details><summary>キャンセル・返品について</summary><p>ご注文確定後のお客様都合によるキャンセル、返品、交換は受け付けておりません。商品違い、または到着時に著しい破損がある場合は、到着後3日以内に写真を添えてご連絡ください。</p></details></section>
+<section class="cta"><p>新作や制作の様子はInstagramで更新しています。</p><a class="btn" href="https://www.instagram.com/kawano.hotorino.ohanaya/" target="_blank">Instagramを見る</a></section></main>
+<footer>© かわのほとりのお花屋</footer>
+<dialog id="dlg"><button class="x" onclick="dlg.close()">×</button><img id="dimg"><div class="dialog-body"><p id="dcat" class="kicker"></p><h2 id="dname"></h2><p id="dprice" class="price"></p><p id="ddesc"></p><ul id="ddetails"></ul><a id="dbuy" class="btn full" href="#">購入手続きへ</a><p id="dnote"></p></div></dialog>
+<script src="script.js"></script></body></html>
