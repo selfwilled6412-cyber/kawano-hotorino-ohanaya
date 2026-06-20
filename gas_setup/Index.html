@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f5f4f2; padding: 20px 10px; color: #28231e; margin: 0; }
+    .container { max-width: 500px; margin: 0 auto; background: #fff; padding: 30px 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+    h1 { font-size: 1.4rem; text-align: center; color: #5a6452; margin-top: 0; margin-bottom: 24px; letter-spacing: 0.05em; }
+    .form-group { margin-bottom: 24px; }
+    label { display: block; font-weight: bold; margin-bottom: 8px; font-size: 0.95rem; }
+    input[type="text"], input[type="number"], input[type="password"], select, textarea {
+      width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1rem; background: #fafafa;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
+      outline: none; border-color: #5a6452; background: #fff;
+    }
+    textarea { resize: vertical; height: 120px; line-height: 1.5; }
+    .help-text { font-size: 0.8rem; color: #666; margin-top: 6px; }
+    .checkbox-label { font-weight: normal; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .checkbox-label input { width: 18px; height: 18px; }
+    
+    .security-box { background: #fdfaf6; border: 1px solid #e8dbce; padding: 16px; border-radius: 4px; margin-bottom: 24px; }
+    .security-box label { color: #8a6d4b; }
+    
+    .btn { background: #5a6452; color: #fff; padding: 16px; width: 100%; border: none; border-radius: 4px; font-size: 1.1rem; letter-spacing: 0.1em; cursor: pointer; transition: 0.3s; margin-top: 10px; }
+    .btn:hover { background: #4a5442; }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    
+    #message { margin-top: 20px; text-align: center; font-weight: bold; line-height: 1.5; }
+    .success { color: #5a6452; background: #eaf1e3; padding: 10px; border-radius: 4px; }
+    .error { color: #d32f2f; background: #ffebee; padding: 10px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>商品登録フォーム</h1>
+    <form id="productForm" onsubmit="submitForm(event)">
+      
+      <div class="security-box">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label>管理パスワード（必須）</label>
+          <input type="password" id="adminToken" name="adminToken" placeholder="オーナー用のパスワードを入力" required>
+          <div class="help-text">※セキュリティ保護のため、パスワードが必要です。</div>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="savePassword" name="savePassword">
+            <span>この端末に管理パスワードを保存する</span>
+          </label>
+          <div class="help-text" style="color: #d32f2f; font-weight: bold;">※本人のスマホ専用です。共有端末では保存しないでください。</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>商品写真（必須）</label>
+        <input type="file" name="imageFile" accept="image/*" required>
+        <div class="help-text">スマホで撮影した写真を選んでください（1点のみ）</div>
+      </div>
+
+      <div class="form-group">
+        <label>商品名（必須）</label>
+        <input type="text" name="productName" placeholder="例：ミモザのハーフリース" required>
+      </div>
+
+      <div class="form-group">
+        <label>カテゴリ（必須）</label>
+        <select name="category" required>
+          <option value="リース">リース</option>
+          <option value="ブーケ">ブーケ</option>
+          <option value="スワッグ">スワッグ</option>
+          <option value="アレンジメント">アレンジメント</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>価格（必須）</label>
+        <input type="number" name="price" placeholder="例：1500" required>
+        <div class="help-text">※税込・送料込みの価格を半角数字で入力してください</div>
+      </div>
+
+      <div class="form-group">
+        <label>商品の説明（必須）</label>
+        <textarea name="description" placeholder="使用した花材や、どんな空間に合うかなど、商品の魅力を書いてください" required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>詳細オプション1</label>
+        <input type="text" name="detail1" value="一点もの">
+      </div>
+
+      <div class="form-group">
+        <label>詳細オプション2</label>
+        <input type="text" name="detail2" value="税込・送料込み">
+      </div>
+
+      <div class="form-group">
+        <label>詳細オプション3</label>
+        <input type="text" name="detail3" placeholder="例：壁掛け用、ギフトにおすすめ 等">
+      </div>
+
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" name="isVisible" value="true" checked>
+          <span>公開する（LPに表示する）</span>
+        </label>
+        <div class="help-text">※チェックを外すとLPには表示されません（非公開）</div>
+      </div>
+
+      <button type="submit" id="submitBtn" class="btn">登録する</button>
+      <div id="message"></div>
+    </form>
+  </div>
+
+  <script>
+    // ページ読み込み時にlocalStorageを確認し、保存されていれば自動入力する
+    document.addEventListener("DOMContentLoaded", function() {
+      const savedToken = localStorage.getItem('adminToken');
+      if (savedToken) {
+        document.getElementById('adminToken').value = savedToken;
+        document.getElementById('savePassword').checked = true;
+      }
+    });
+
+    function submitForm(event) {
+      event.preventDefault();
+      
+      const form = document.getElementById('productForm');
+      const btn = document.getElementById('submitBtn');
+      const msg = document.getElementById('message');
+      
+      const adminTokenValue = document.getElementById('adminToken').value;
+      const savePasswordChecked = document.getElementById('savePassword').checked;
+      
+      // 送信時にチェック状態に応じてlocalStorageを保存・削除
+      if (savePasswordChecked) {
+        localStorage.setItem('adminToken', adminTokenValue);
+      } else {
+        localStorage.removeItem('adminToken');
+      }
+      
+      btn.disabled = true;
+      btn.textContent = "画像をアップロード中...";
+      msg.textContent = "";
+      msg.className = "";
+
+      // フォームデータを取得
+      const formData = new FormData(form);
+
+      // GASの関数 'registerProduct' を呼び出し
+      google.script.run
+        .withSuccessHandler(function(response) {
+          btn.disabled = false;
+          btn.textContent = "登録する";
+          if (response.success) {
+            msg.textContent = response.message;
+            msg.className = "success";
+            
+            form.reset(); 
+            
+            // 成功後フォームがリセットされても、保存設定がONならパスワードとチェックを復元する
+            if (savePasswordChecked) {
+              document.getElementById('adminToken').value = adminTokenValue;
+              document.getElementById('savePassword').checked = true;
+            }
+          } else {
+            msg.textContent = response.message;
+            msg.className = "error";
+          }
+        })
+        .withFailureHandler(function(error) {
+          btn.disabled = false;
+          btn.textContent = "登録する";
+          msg.textContent = "通信エラーが発生しました: " + error.message;
+          msg.className = "error";
+        })
+        .registerProduct(form);
+    }
+  </script>
+</body>
+</html>

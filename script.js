@@ -234,24 +234,75 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================
-  // Fetch Products
+  // Fetch Products (JSONP & Fallback)
   // ==========================================
+  const GAS_URL = 'https://script.google.com/macros/s/AKfycbwXd82BK5wZlIJwus8QtFHZD8ZIQl0v1uDG5j3VRZlrBhHb0f-4vR8Kj7m4ybv8ebD7zg/exec';
+
+  function fetchProductsJsonp() {
+    return new Promise((resolve, reject) => {
+      const callbackName = 'gasCallback_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+      
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error('JSONP timeout'));
+      }, 8000); // 8秒でタイムアウト
+
+      window[callbackName] = function(data) {
+        cleanup();
+        if (data && data.success) {
+          resolve(data.products);
+        } else {
+          reject(new Error(data ? data.message : 'Unknown GAS Error'));
+        }
+      };
+
+      const script = document.createElement('script');
+      script.src = `${GAS_URL}?action=getProducts&callback=${callbackName}`;
+      script.id = callbackName;
+      script.onerror = function() {
+        cleanup();
+        reject(new Error('JSONP script load error'));
+      };
+
+      document.body.appendChild(script);
+
+      function cleanup() {
+        clearTimeout(timeoutId);
+        if (window[callbackName]) delete window[callbackName];
+        const s = document.getElementById(callbackName);
+        if (s) s.remove();
+      }
+    });
+  }
+
   async function loadProducts() {
     if (Array.isArray(window.PREVIEW_PRODUCTS)) return window.PREVIEW_PRODUCTS;
-    if (Array.isArray(window.FALLBACK_PRODUCTS)) return window.FALLBACK_PRODUCTS;
 
     try {
+      // 1. まずGAS APIからJSONPで取得を試みる
+      const gasProducts = await fetchProductsJsonp();
+      // 取得成功時は、商品0件の場合でもフォールバックさせずにそのまま返す
+      if (gasProducts && Array.isArray(gasProducts)) {
+        return gasProducts;
+      }
+    } catch (error) {
+      console.warn('GAS fetch error. Falling back to local data.', error);
+    }
+
+    try {
+      // 2. 失敗したら products.json を読み込む
       const res = await fetch('products.json');
       if (!res.ok) throw new Error('products.json fetch failed');
       return await res.json();
     } catch (error) {
+      // 3. それも失敗したら FALLBACK_PRODUCTS を使う
       console.warn('Fetch error. Using fallback products.', error);
-      return FALLBACK_PRODUCTS;
+      return Array.isArray(window.FALLBACK_PRODUCTS) ? window.FALLBACK_PRODUCTS : FALLBACK_PRODUCTS;
     }
   }
 
   loadProducts().then(data => {
-    if (data && data.length > 0) {
+    if (Array.isArray(data)) {
       productsData = data;
       renderProducts(data);
     } else {
@@ -268,24 +319,57 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderProducts(products) {
     if (!grid) return;
     
+    // 商品が0件の場合の空表示
+    if (products.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-products" style="text-align: center; padding: 60px 20px; grid-column: 1 / -1; width: 100%;">
+          <h3 style="font-size: 1.4rem; margin-bottom: 16px;">現在、販売中の作品はありません</h3>
+          <p style="color: var(--color-text-light); margin-bottom: 32px; line-height: 1.8;">新作はInstagramでお知らせしています。<br>オーダー相談はLINEからお気軽にどうぞ。</p>
+          <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+            <a href="https://www.instagram.com/kawano.hotorino.ohanaya/" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="min-height: 48px; padding: 0 24px;">Instagramを見る</a>
+            <a href="https://lin.ee/ruQqILua" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="min-height: 48px; padding: 0 24px;">オーダー相談をする</a>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     grid.innerHTML = products.map((p, index) => {
       const isSold = p.status === 'soldout';
+      const isReserved = p.status === 'reserved';
+      const isUnavailable = isSold || isReserved;
       // 最大8個分（400ms）を上限とする遅延
       const delayMs = Math.min(index * 50, 400);
 
-      return `
-        <article class="product-card reveal ${isSold ? 'is-sold' : ''}" style="transition-delay: ${delayMs}ms;" data-id="${p.id}" tabindex="0" role="button" aria-label="${p.name}の詳細を見る">
-          <div class="product-image">
-            <img src="${p.image}" alt="${p.name}" loading="lazy">
-            <div class="badge-wrapper">
-              <span class="badge">${isSold ? '完売' : '一点もの'}</span>
-            </div>
-            ${isSold ? `
+      let badgeText = '一点もの';
+      if (isSold) badgeText = '完売';
+      if (isReserved) badgeText = '決済中';
+
+      let overlayHTML = '';
+      if (isSold) {
+        overlayHTML = `
               <div class="sold-overlay">
                 <span class="sold-title">SOLD OUT</span>
                 <span class="sold-sub">次の作品をお楽しみに</span>
               </div>
-            ` : ''}
+        `;
+      } else if (isReserved) {
+        overlayHTML = `
+              <div class="sold-overlay" style="background: rgba(0,0,0,0.4);">
+                <span class="sold-title" style="font-size: 1.2rem;">決済手続中</span>
+                <span class="sold-sub">他のお客様が手続中です</span>
+              </div>
+        `;
+      }
+
+      return `
+        <article class="product-card reveal ${isUnavailable ? 'is-sold' : ''}" style="transition-delay: ${delayMs}ms;" data-id="${p.id}" tabindex="0" role="button" aria-label="${p.name}の詳細を見る">
+          <div class="product-image">
+            <img src="${p.image}" alt="${p.name}" loading="lazy" onerror="this.onerror=null;this.src='product1.jpg';this.style.opacity='0.5';">
+            <div class="badge-wrapper">
+              <span class="badge">${badgeText}</span>
+            </div>
+            ${overlayHTML}
           </div>
           <div class="product-info">
             <span class="product-cat">${p.category}</span>
@@ -323,8 +407,14 @@ document.addEventListener('DOMContentLoaded', () => {
     dcat.textContent = p.category;
     dname.textContent = p.name;
     dprice.textContent = `¥${p.price.toLocaleString()}`;
-    ddesc.textContent = p.desc;
-    ddetails.innerHTML = p.details.map(x => `<li>${x}</li>`).join('');
+    // GASからは description、既存データは desc で来る場合の両対応
+    ddesc.textContent = p.description || p.desc || '';
+    
+    if (Array.isArray(p.details)) {
+      ddetails.innerHTML = p.details.map(x => `<li>${x}</li>`).join('');
+    } else {
+      ddetails.innerHTML = '';
+    }
 
     // ボタンの制御
     if (p.status === 'soldout') {
@@ -334,7 +424,15 @@ document.addEventListener('DOMContentLoaded', () => {
       dbuy.setAttribute('aria-disabled', 'true');
       dbuy.style.pointerEvents = 'none';
       dnote.textContent = 'こちらの商品は完売いたしました。';
-    } else if (!p.stripe_url) {
+    } else if (p.status === 'reserved') {
+      dbuy.textContent = '現在手続き中';
+      dbuy.href = '#';
+      dbuy.disabled = true;
+      dbuy.setAttribute('aria-disabled', 'true');
+      dbuy.style.pointerEvents = 'none';
+      dnote.textContent = '他のお客様が決済手続き中のため、一時的に購入できません。';
+    } else {
+      // status === 'available'
       dbuy.textContent = '購入手続きへ（準備中）';
       dbuy.href = '#';
       dbuy.disabled = false;
@@ -345,14 +443,6 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('現在準備中です。Stripeリンク設定後に購入可能になります。');
       };
       dnote.textContent = '現在はデモ表示のため購入できません。';
-    } else {
-      dbuy.textContent = '購入手続きへ';
-      dbuy.href = p.stripe_url;
-      dbuy.disabled = false;
-      dbuy.removeAttribute('aria-disabled');
-      dbuy.style.pointerEvents = 'auto';
-      dbuy.onclick = null;
-      dnote.textContent = 'Stripeの安全な決済画面へ移動します。';
     }
 
     dlg.showModal();
