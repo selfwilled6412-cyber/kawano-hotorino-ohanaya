@@ -265,6 +265,19 @@ function doGet(e) {
   const action = params.action;
   const callback = params.callback;
 
+  // 購入開始API
+  if (action === 'createCheckoutSession') {
+    const result = createCheckoutSession(params);
+    const jsonString = JSON.stringify(result);
+    if (callback) {
+      return ContentService.createTextOutput(callback + '(' + jsonString + ');')
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+    } else {
+      return ContentService.createTextOutput(jsonString)
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   // 商品一覧JSON取得API
   if (action === 'getProducts') {
     const result = getProductsList();
@@ -356,5 +369,321 @@ function registerProduct(formObject) {
   } catch (error) {
     console.error(error);
     return { success: false, message: "登録に失敗しました: " + error.message };
+  }
+}
+
+/**
+ * 購入開始処理 (Stripe Checkout Session作成)
+ */
+function createCheckoutSession(params) {
+  const productId = params.productId;
+  if (!productId) {
+    return { success: false, message: "商品IDが指定されていません。" };
+  }
+
+  const lock = LockService.getScriptLock();
+  try {
+    // 10秒間ロックを取得。他人が同時に購入ボタンを押した場合の排他制御
+    lock.waitLock(10000);
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('products');
+    const data = sheet.getDataRange().getValues();
+    
+    let rowIndex = -1;
+    let productRow = null;
+    
+    // 商品を探す (1行目はヘッダー)
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === productId) {
+        rowIndex = i + 1; // getRangeは1始まり
+        productRow = data[i];
+        break;
+      }
+    }
+    
+    if (rowIndex === -1) {
+      return { success: false, message: "商品が見つかりません。" };
+    }
+    
+    const isVisible = productRow[1];
+    const productName = productRow[2];
+    const price = parseInt(productRow[4], 10);
+    const status = productRow[10];
+    
+    if (isVisible !== true) {
+      return { success: false, message: "この商品は現在販売されていません。" };
+    }
+    
+    if (status !== "available") {
+      return { success: false, message: "現在、他のお客様が手続き中です。" };
+    }
+    
+    // 状態を reserved にし、予約期限を30分後に設定
+    const now = new Date();
+    const expireTime = new Date(now.getTime() + 30 * 60000); // 30分後
+    
+    sheet.getRange(rowIndex, 11).setValue("reserved"); // K列
+    sheet.getRange(rowIndex, 12).setValue(expireTime); // L列
+    SpreadsheetApp.flush(); // 即時反映
+    
+    // Stripeキーの取得
+    const props = PropertiesService.getScriptProperties();
+    const stripeSecretKey = props.getProperty('STRIPE_SECRET_KEY');
+    const successUrl = props.getProperty('SUCCESS_URL');
+    const cancelUrl = props.getProperty('CANCEL_URL');
+    
+    if (!stripeSecretKey || !successUrl || !cancelUrl) {
+      // 未設定時はロールバックして、やさしいエラーを返す
+      sheet.getRange(rowIndex, 11).setValue("available");
+      sheet.getRange(rowIndex, 12).setValue("");
+      SpreadsheetApp.flush();
+      return { 
+        success: false, 
+        message: "現在、決済準備中です。オーダー相談はLINEからお願いします。",
+        code: "STRIPE_NOT_CONFIGURED"
+      };
+    }
+    
+    // Stripe API呼び出し
+    const url = "https://api.stripe.com/v1/checkout/sessions";
+    const payload = {
+      "payment_method_types[0]": "card",
+      "mode": "payment",
+      "success_url": successUrl,
+      "cancel_url": cancelUrl,
+      "line_items[0][price_data][currency]": "jpy",
+      "line_items[0][price_data][product_data][name]": productName,
+      "line_items[0][price_data][unit_amount]": price,
+      "line_items[0][quantity]": 1,
+      "metadata[productId]": productId
+    };
+    
+    const options = {
+      "method": "post",
+      "headers": {
+        "Authorization": "Bearer " + stripeSecretKey
+      },
+      "payload": payload,
+      "muteHttpExceptions": true
+    };
+    
+    const response = UrlFetchApp.fetch(url, options);
+    const result = JSON.parse(response.getContentText());
+    
+    if (response.getResponseCode() === 200 && result.url) {
+      return { success: true, checkoutUrl: result.url };
+    } else {
+      // Stripe側でエラーになった場合もロールバック
+      sheet.getRange(rowIndex, 11).setValue("available");
+      sheet.getRange(rowIndex, 12).setValue("");
+      SpreadsheetApp.flush();
+      console.error("Stripe Checkout Error: ", result);
+      return { success: false, message: "決済セッションの作成に失敗しました。" };
+    }
+    
+  } catch (e) {
+    console.error(e);
+    return { success: false, message: "混雑しているか、予期せぬエラーが発生しました。" };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Cloudflare WorkersからWebhookを受け取る処理
+ */
+function doPost(e) {
+  const props = PropertiesService.getScriptProperties();
+  const validToken = props.getProperty('GAS_WEBHOOK_TOKEN');
+  
+  // 1. トークン検証（未設定時はエラー）
+  if (!validToken || e.parameter.token !== validToken) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      message: "Invalid Token"
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  try {
+    const payload = JSON.parse(e.postData.contents);
+    const eventType = payload.type;
+    const session = payload.data.object;
+    const productId = session.metadata ? session.metadata.productId : null;
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const productsSheet = ss.getSheetByName('products');
+    const ordersSheet = ss.getSheetByName('orders');
+    
+    if (!productId || !productsSheet || !ordersSheet) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        message: "Missing required data"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    if (eventType === 'checkout.session.completed') {
+      // 2. Webhook重複対策（すでに同じStripe決済IDが存在するか確認）
+      const sessionId = session.id;
+      const ordersData = ordersSheet.getDataRange().getValues();
+      for (let i = 1; i < ordersData.length; i++) {
+        if (ordersData[i][10] === sessionId) { // K列(10): Stripe決済ID
+          return ContentService.createTextOutput(JSON.stringify({
+            success: true,
+            message: "Already processed"
+          })).setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+      
+      // 3. 商品を soldout にする
+      const pData = productsSheet.getDataRange().getValues();
+      let rowIndex = -1;
+      let productName = "不明な商品";
+      let price = 0;
+      
+      for (let i = 1; i < pData.length; i++) {
+        if (pData[i][0] === productId) {
+          rowIndex = i + 1;
+          productName = pData[i][2];
+          price = pData[i][4];
+          break;
+        }
+      }
+      
+      if (rowIndex !== -1) {
+        productsSheet.getRange(rowIndex, 11).setValue("soldout"); // 販売状態
+        productsSheet.getRange(rowIndex, 12).setValue("");        // 予約期限クリア
+      }
+      
+      // 4. ordersシートに記録
+      const customerName = session.customer_details ? session.customer_details.name : "";
+      const customerEmail = session.customer_details ? session.customer_details.email : "";
+      
+      // 住所の組み立て
+      let addressStr = "";
+      if (session.shipping_details && session.shipping_details.address) {
+        const addr = session.shipping_details.address;
+        addressStr = `${addr.postal_code || ''} ${addr.state || ''}${addr.city || ''}${addr.line1 || ''} ${addr.line2 || ''}`.trim();
+        if (session.shipping_details.name) {
+          addressStr += ` (宛名: ${session.shipping_details.name})`;
+        }
+      }
+      
+      // 注文ID生成 (例: ORD-20260620-XXXX)
+      const dateStr = Utilities.formatDate(new Date(), "JST", "yyyyMMdd");
+      const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const orderId = `ORD-${dateStr}-${randomStr}`;
+      
+      const orderRow = [
+        orderId,                    // A: 注文ID
+        new Date(),                 // B: 注文日時
+        productId,                  // C: 商品ID
+        productName,                // D: 商品名
+        session.amount_total || price, // E: 価格
+        customerName,               // F: 購入者名
+        customerEmail,              // G: 購入者メール
+        addressStr,                 // H: 配送先住所
+        session.payment_status,     // I: 支払い状態
+        "未発送",                     // J: 発送状態
+        sessionId,                  // K: Stripe決済ID
+        "未通知",                     // L: 通知状態
+        ""                          // M: メモ
+      ];
+      ordersSheet.appendRow(orderRow);
+      
+      // 5. 発送通知メール送信 (OWNER_EMAILが設定されている場合のみ)
+      const ownerEmail = props.getProperty('OWNER_EMAIL');
+      if (ownerEmail) {
+        try {
+          const subject = `[新規注文] ${productName} が売れました`;
+          const body = `
+かわのほとりのお花屋に新規注文が入りました。
+
+■ 注文内容
+注文ID: ${orderId}
+商品名: ${productName}
+金額: ${session.amount_total || price}円
+
+■ 購入者情報
+お名前: ${customerName}
+メール: ${customerEmail}
+配送先: ${addressStr}
+
+StripeダッシュボードやGoogleスプレッドシート(ordersシート)で詳細を確認し、発送準備をお願いします。
+          `.trim();
+          
+          MailApp.sendEmail(ownerEmail, subject, body);
+        } catch (mailErr) {
+          console.error("Mail send error:", mailErr);
+          // メールエラーで止まらないようにする
+        }
+      }
+      
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "Success"
+      })).setMimeType(ContentService.MimeType.JSON);
+      
+    } else if (eventType === 'checkout.session.expired') {
+      // 決済期限切れ時は available に戻す
+      const pData = productsSheet.getDataRange().getValues();
+      for (let i = 1; i < pData.length; i++) {
+        if (pData[i][0] === productId && pData[i][10] === "reserved") {
+          productsSheet.getRange(i + 1, 11).setValue("available");
+          productsSheet.getRange(i + 1, 12).setValue("");
+          break;
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "Session expired handled"
+      })).setMimeType(ContentService.MimeType.JSON);
+      
+    } else {
+      // その他のイベントは無視
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "Ignored event"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+  } catch (err) {
+    console.error(err);
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      message: "Internal Server Error"
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
+ * 予約期限切れの商品を available に戻す (時間主導型トリガー用)
+ */
+function releaseExpiredReservations() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('products');
+  if (!sheet) return;
+  
+  const data = sheet.getDataRange().getValues();
+  const now = new Date();
+  let changed = false;
+  
+  for (let i = 1; i < data.length; i++) {
+    const status = data[i][10];
+    const expireTime = data[i][11]; // L列: 予約期限
+    
+    if (status === "reserved" && expireTime) {
+      const expireDate = new Date(expireTime);
+      if (now > expireDate) {
+        // 期限切れ
+        sheet.getRange(i + 1, 11).setValue("available");
+        sheet.getRange(i + 1, 12).setValue("");
+        changed = true;
+      }
+    }
+  }
+  
+  if (changed) {
+    Logger.log("期限切れの予約を available に戻しました。");
   }
 }

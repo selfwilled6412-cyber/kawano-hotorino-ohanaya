@@ -399,55 +399,126 @@ document.addEventListener('DOMContentLoaded', () => {
   // Modal Control
   // ==========================================
   function openModal(id) {
-    const p = productsData.find(x => x.id === id);
-    if (!p) return;
+    try {
+      const p = productsData.find(x => x.id === id);
+      if (!p) {
+        console.warn('Product not found for id:', id);
+        return;
+      }
 
-    dimg.src = p.image;
-    dimg.alt = p.name;
-    dcat.textContent = p.category;
-    dname.textContent = p.name;
-    dprice.textContent = `¥${p.price.toLocaleString()}`;
-    // GASからは description、既存データは desc で来る場合の両対応
-    ddesc.textContent = p.description || p.desc || '';
-    
-    if (Array.isArray(p.details)) {
-      ddetails.innerHTML = p.details.map(x => `<li>${x}</li>`).join('');
-    } else {
-      ddetails.innerHTML = '';
+      if (dimg) {
+        dimg.src = p.image || '';
+        dimg.alt = p.name || '';
+      }
+      if (dcat) dcat.textContent = p.category || '';
+      if (dname) dname.textContent = p.name || '';
+      if (dprice) {
+        const priceNum = Number(p.price) || 0;
+        dprice.textContent = `¥${priceNum.toLocaleString()}`;
+      }
+      if (ddesc) ddesc.textContent = p.description || p.desc || '';
+      
+      if (ddetails) {
+        if (Array.isArray(p.details)) {
+          ddetails.innerHTML = p.details.map(x => `<li>${x}</li>`).join('');
+        } else {
+          ddetails.innerHTML = '';
+        }
+      }
+
+      // ボタンの制御
+      if (dbuy && dnote) {
+        if (p.status === 'soldout') {
+          dbuy.textContent = 'SOLD OUT';
+          dbuy.href = '#';
+          dbuy.disabled = true;
+          dbuy.setAttribute('aria-disabled', 'true');
+          dbuy.style.pointerEvents = 'none';
+          dnote.textContent = 'こちらの商品は完売いたしました。';
+          dnote.style.color = '';
+        } else if (p.status === 'reserved') {
+          dbuy.textContent = '現在手続き中';
+          dbuy.href = '#';
+          dbuy.disabled = true;
+          dbuy.setAttribute('aria-disabled', 'true');
+          dbuy.style.pointerEvents = 'none';
+          dnote.textContent = '他のお客様が決済手続き中のため、一時的に購入できません。';
+          dnote.style.color = '';
+        } else {
+          // status === 'available'
+          dbuy.textContent = '購入手続きへ';
+          dbuy.href = '#';
+          dbuy.disabled = false;
+          dbuy.removeAttribute('aria-disabled');
+          dbuy.style.pointerEvents = 'auto';
+          dnote.textContent = 'クレジットカード、Apple Pay、Google Payなどがご利用いただけます。';
+          dnote.style.color = ''; // reset color
+          
+          dbuy.onclick = (e) => {
+            e.preventDefault();
+            if (dbuy.disabled) return;
+            
+            // 処理中UIへ変更
+            const originalText = dbuy.textContent;
+            dbuy.textContent = '処理中...';
+            dbuy.disabled = true;
+            dbuy.style.pointerEvents = 'none';
+            dnote.textContent = '決済画面を準備しています...';
+            dnote.style.color = '';
+            
+            const callbackName = 'jsonp_checkout_' + Date.now();
+            const timeoutId = setTimeout(() => {
+              cleanup();
+              handleError('通信タイムアウトが発生しました。通信環境を確認してもう一度お試しください。');
+            }, 15000);
+            
+            window[callbackName] = function(data) {
+              cleanup();
+              if (data && data.success) {
+                // Stripe Checkoutへリダイレクト
+                window.location.href = data.checkoutUrl;
+              } else {
+                handleError(data ? data.message : '予期せぬエラーが発生しました。');
+              }
+            };
+            
+            function handleError(msg) {
+              dbuy.textContent = originalText;
+              dbuy.disabled = false;
+              dbuy.style.pointerEvents = 'auto';
+              dnote.textContent = msg;
+              dnote.style.color = '#d32f2f'; // エラー色
+            }
+            
+            function cleanup() {
+              clearTimeout(timeoutId);
+              if (window[callbackName]) delete window[callbackName];
+              const s = document.getElementById(callbackName);
+              if (s) s.remove();
+            }
+            
+            const script = document.createElement('script');
+            // GAS_URLが未定義の場合の安全対策
+            const urlBase = typeof GAS_URL !== 'undefined' ? GAS_URL : 'https://script.google.com/macros/s/AKfycbwXd82BK5wZlIJwus8QtFHZD8ZIQl0v1uDG5j3VRZlrBhHb0f-4vR8Kj7m4ybv8ebD7zg/exec';
+            script.src = `${urlBase}?action=createCheckoutSession&productId=${p.id}&callback=${callbackName}`;
+            script.id = callbackName;
+            script.onerror = function() {
+              cleanup();
+              handleError('通信エラーが発生しました。しばらく経ってからお試しください。');
+            };
+            document.body.appendChild(script);
+          };
+        }
+      }
+
+      if (dlg) {
+        dlg.showModal();
+        document.body.style.overflow = 'hidden';
+      }
+    } catch (err) {
+      console.error('Modal Open Error:', err);
+      alert('申し訳ありません。表示にエラーが発生しました。ページをリロードしてお試しください。');
     }
-
-    // ボタンの制御
-    if (p.status === 'soldout') {
-      dbuy.textContent = 'SOLD OUT';
-      dbuy.href = '#';
-      dbuy.disabled = true;
-      dbuy.setAttribute('aria-disabled', 'true');
-      dbuy.style.pointerEvents = 'none';
-      dnote.textContent = 'こちらの商品は完売いたしました。';
-    } else if (p.status === 'reserved') {
-      dbuy.textContent = '現在手続き中';
-      dbuy.href = '#';
-      dbuy.disabled = true;
-      dbuy.setAttribute('aria-disabled', 'true');
-      dbuy.style.pointerEvents = 'none';
-      dnote.textContent = '他のお客様が決済手続き中のため、一時的に購入できません。';
-    } else {
-      // status === 'available'
-      dbuy.textContent = '購入手続きへ（準備中）';
-      dbuy.href = '#';
-      dbuy.disabled = false;
-      dbuy.removeAttribute('aria-disabled');
-      dbuy.style.pointerEvents = 'auto';
-      dbuy.onclick = (e) => {
-        e.preventDefault();
-        alert('現在準備中です。Stripeリンク設定後に購入可能になります。');
-      };
-      dnote.textContent = '現在はデモ表示のため購入できません。';
-    }
-
-    dlg.showModal();
-    // モーダルが開いたら本文のスクロールを防ぐ
-    document.body.style.overflow = 'hidden';
   }
 
   function closeModal() {
