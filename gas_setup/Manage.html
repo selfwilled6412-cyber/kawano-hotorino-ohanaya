@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f5f4f2; padding: 20px 10px; color: #28231e; margin: 0; }
+    .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 30px 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+    h1 { font-size: 1.4rem; text-align: center; color: #5a6452; margin-top: 0; margin-bottom: 24px; letter-spacing: 0.05em; }
+    .form-group { margin-bottom: 24px; }
+    label { display: block; font-weight: bold; margin-bottom: 8px; font-size: 0.95rem; }
+    input[type="password"] {
+      width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1rem; background: #fafafa;
+    }
+    input[type="password"]:focus {
+      outline: none; border-color: #5a6452; background: #fff;
+    }
+    .btn { background: #5a6452; color: #fff; padding: 12px; width: 100%; border: none; border-radius: 4px; font-size: 1.1rem; letter-spacing: 0.1em; cursor: pointer; transition: 0.3s; }
+    .btn:hover { background: #4a5442; }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    
+    .product-list { margin-top: 20px; }
+    .product-card { border: 1px solid #e8dbce; border-radius: 6px; padding: 16px; margin-bottom: 16px; background: #fdfaf6; }
+    .product-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+    .product-name { font-weight: bold; font-size: 1.1rem; color: #28231e; }
+    .product-price { color: #666; }
+    .product-status { font-size: 0.9rem; margin-bottom: 12px; color: #555; }
+    .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; margin-right: 8px; }
+    
+    .status-visible { background: #eaf1e3; color: #3b4636; }
+    .status-hidden { background: #eeeeee; color: #666666; }
+    .status-available { background: #e3f2fd; color: #1565c0; }
+    .status-reserved { background: #fff3e0; color: #e65100; }
+    .status-soldout { background: #ffebee; color: #c62828; }
+
+    .action-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn-action { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; transition: 0.2s; flex: 1; min-width: 100px; text-align: center; }
+    .btn-hide { background: #9e9e9e; color: #fff; }
+    .btn-hide:hover { background: #757575; }
+    .btn-soldout { background: #ef5350; color: #fff; }
+    .btn-soldout:hover { background: #c62828; }
+    .btn-relist { background: #42a5f5; color: #fff; }
+    .btn-relist:hover { background: #1e88e5; }
+    .btn-action:disabled { background: #ccc; cursor: not-allowed; }
+
+    #message { margin-top: 20px; text-align: center; font-weight: bold; line-height: 1.5; }
+    .success { color: #5a6452; background: #eaf1e3; padding: 10px; border-radius: 4px; }
+    .error { color: #d32f2f; background: #ffebee; padding: 10px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>商品管理</h1>
+    
+    <div class="form-group">
+      <label>管理パスワード</label>
+      <input type="password" id="adminToken" placeholder="パスワードを入力">
+    </div>
+    <button id="loadBtn" class="btn" onclick="loadProducts()">商品一覧を読み込む</button>
+    
+    <div id="message"></div>
+    <div id="productList" class="product-list"></div>
+  </div>
+
+  <script>
+    // ページ読み込み時にlocalStorageを確認し、保存されていれば自動入力する
+    document.addEventListener("DOMContentLoaded", function() {
+      const savedToken = localStorage.getItem('adminToken');
+      if (savedToken) {
+        document.getElementById('adminToken').value = savedToken;
+        loadProducts(); // 自動読み込み
+      }
+    });
+
+    function showMessage(text, isError) {
+      const msg = document.getElementById('message');
+      msg.textContent = text;
+      msg.className = isError ? "error" : "success";
+      if (!isError) {
+        setTimeout(() => { msg.textContent = ""; msg.className = ""; }, 3000);
+      }
+    }
+
+    function loadProducts() {
+      const token = document.getElementById('adminToken').value;
+      if (!token) {
+        showMessage("管理パスワードを入力してください", true);
+        return;
+      }
+      
+      const btn = document.getElementById('loadBtn');
+      btn.disabled = true;
+      btn.textContent = "読み込み中...";
+      document.getElementById('message').textContent = "";
+      
+      google.script.run
+        .withSuccessHandler(function(response) {
+          btn.disabled = false;
+          btn.textContent = "商品一覧を読み込む";
+          
+          if (response.success) {
+            localStorage.setItem('adminToken', token); // 成功したら保存
+            renderProducts(response.products);
+          } else {
+            showMessage(response.message, true);
+          }
+        })
+        .withFailureHandler(function(error) {
+          btn.disabled = false;
+          btn.textContent = "商品一覧を読み込む";
+          showMessage("通信エラー: " + error.message, true);
+        })
+        .getProductsForManage(token);
+    }
+
+    function renderProducts(products) {
+      const container = document.getElementById('productList');
+      container.innerHTML = "";
+      
+      if (products.length === 0) {
+        container.innerHTML = "<p style='text-align:center;'>商品がありません。</p>";
+        return;
+      }
+      
+      products.forEach(p => {
+        const card = document.createElement('div');
+        card.className = "product-card";
+        
+        // 状態バッジの決定
+        const visibleText = p.isVisible ? "表示中" : "非表示";
+        const visibleClass = p.isVisible ? "status-visible" : "status-hidden";
+        
+        let statusText = p.status;
+        let statusClass = "status-hidden";
+        if (p.status === "available") { statusText = "販売中"; statusClass = "status-available"; }
+        else if (p.status === "reserved") { statusText = "予約中(購入手続き中)"; statusClass = "status-reserved"; }
+        else if (p.status === "soldout") { statusText = "SOLD OUT"; statusClass = "status-soldout"; }
+        else if (p.status === "hidden") { statusText = "非表示"; statusClass = "status-hidden"; }
+        
+        const priceFmt = p.price ? p.price.toLocaleString() + "円" : "未設定";
+
+        card.innerHTML = `
+          <div class="product-header">
+            <div class="product-name">${p.name}</div>
+            <div class="product-price">${priceFmt}</div>
+          </div>
+          <div class="product-status">
+            <span class="status-badge ${visibleClass}">${visibleText}</span>
+            <span class="status-badge ${statusClass}">${statusText}</span>
+          </div>
+          <div class="action-buttons">
+            <button class="btn-action btn-hide" onclick="updateStatus('${p.id}', 'hide')">非表示にする</button>
+            <button class="btn-action btn-soldout" onclick="updateStatus('${p.id}', 'soldout')">SOLD OUTにする</button>
+            <button class="btn-action btn-relist" onclick="updateStatus('${p.id}', 'relist')">再販売する</button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function updateStatus(productId, actionType) {
+      let actionName = "";
+      if (actionType === 'hide') actionName = "「非表示」";
+      if (actionType === 'soldout') actionName = "「SOLD OUT」";
+      if (actionType === 'relist') actionName = "「再販売」";
+      
+      if (!confirm(`この商品を${actionName}に変更します。よろしいですか？`)) {
+        return;
+      }
+      
+      const token = document.getElementById('adminToken').value;
+      if (!token) return;
+      
+      // 全ボタンを一時無効化
+      const buttons = document.querySelectorAll('.btn-action');
+      buttons.forEach(b => b.disabled = true);
+      
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (response.success) {
+            showMessage(response.message, false);
+            loadProducts(); // リスト再読み込み
+          } else {
+            showMessage(response.message, true);
+            buttons.forEach(b => b.disabled = false);
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage("通信エラー: " + error.message, true);
+          buttons.forEach(b => b.disabled = false);
+        })
+        .updateProductStatus(token, productId, actionType);
+    }
+  </script>
+</body>
+</html>

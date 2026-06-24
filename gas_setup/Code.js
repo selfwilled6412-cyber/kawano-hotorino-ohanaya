@@ -257,7 +257,7 @@ function getProductsList() {
 
 /**
  * HTTP GETリクエストを受け取った時の処理
- * (商品登録フォームの表示 or 商品一覧APIの返却)
+ * (商品登録フォームの表示 or 商品一覧APIの返却 or 商品管理画面の表示)
  */
 function doGet(e) {
   // パラメータがない場合は、e.parameter.action が undefined になるのを防ぐ
@@ -292,6 +292,13 @@ function doGet(e) {
       return ContentService.createTextOutput(jsonString)
         .setMimeType(ContentService.MimeType.JSON);
     }
+  }
+
+  // 商品管理ページ表示
+  if (action === 'manage') {
+    return HtmlService.createHtmlOutputFromFile('Manage')
+      .setTitle('商品管理 - かわのほとりのお花屋')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
   }
 
   // action指定がない場合は商品登録フォーム（Index.html）を表示
@@ -685,5 +692,99 @@ function releaseExpiredReservations() {
   
   if (changed) {
     Logger.log("期限切れの予約を available に戻しました。");
+  }
+}
+
+/**
+ * 商品管理ページ用：全商品データを取得する
+ */
+function getProductsForManage(adminToken) {
+  if (!verifyAdminToken(adminToken)) {
+    return { success: false, message: "管理パスワードが間違っています。" };
+  }
+  
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('products');
+    if (!sheet) throw new Error("productsシートが見つかりません");
+    
+    const data = sheet.getDataRange().getValues();
+    const products = [];
+    
+    // 1行目はヘッダーなので2行目からループ
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const id = row[0];
+      const isVisible = row[1];
+      const name = row[2];
+      const price = row[4];
+      const status = row[10];
+      
+      if (!id || String(id).trim() === "") continue;
+      
+      products.push({
+        id: String(id),
+        name: String(name),
+        price: Number(price),
+        status: String(status),
+        isVisible: Boolean(isVisible)
+      });
+    }
+    
+    return { success: true, products: products };
+  } catch (error) {
+    console.error(error);
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * 商品の表示状態・販売状態を更新する
+ */
+function updateProductStatus(adminToken, productId, actionType) {
+  if (!verifyAdminToken(adminToken)) {
+    return { success: false, message: "管理パスワードが間違っています。" };
+  }
+  
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('products');
+    if (!sheet) throw new Error("productsシートが見つかりません");
+    
+    const data = sheet.getDataRange().getValues();
+    let rowIndex = -1;
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === productId) {
+        rowIndex = i + 1; // getRangeは1始まり
+        break;
+      }
+    }
+    
+    if (rowIndex === -1) {
+      return { success: false, message: "商品が見つかりません。" };
+    }
+    
+    // アクションに応じた更新処理
+    // B列(2): 表示, K列(11): 販売状態, L列(12): 予約期限
+    if (actionType === 'hide') {
+      sheet.getRange(rowIndex, 2).setValue(false);
+      sheet.getRange(rowIndex, 11).setValue("hidden");
+    } else if (actionType === 'soldout') {
+      sheet.getRange(rowIndex, 2).setValue(true);
+      sheet.getRange(rowIndex, 11).setValue("soldout");
+    } else if (actionType === 'relist') {
+      sheet.getRange(rowIndex, 2).setValue(true);
+      sheet.getRange(rowIndex, 11).setValue("available");
+      sheet.getRange(rowIndex, 12).setValue(""); // 予約期限クリア
+    } else {
+      return { success: false, message: "不明なアクションです。" };
+    }
+    
+    return { success: true, message: "更新しました" };
+    
+  } catch (error) {
+    console.error(error);
+    return { success: false, message: error.message };
   }
 }
