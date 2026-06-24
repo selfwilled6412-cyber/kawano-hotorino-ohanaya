@@ -46,6 +46,28 @@
     #message { margin-top: 20px; text-align: center; font-weight: bold; line-height: 1.5; }
     .success { color: #5a6452; background: #eaf1e3; padding: 10px; border-radius: 4px; }
     .error { color: #d32f2f; background: #ffebee; padding: 10px; border-radius: 4px; }
+
+    /* Modal styles */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5); z-index: 1000;
+      justify-content: center; align-items: center; padding: 20px; box-sizing: border-box;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-content {
+      background: #fff; width: 100%; max-width: 400px; padding: 30px 20px; border-radius: 12px;
+      text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+    .modal-content p { font-size: 1.2rem; margin-bottom: 30px; font-weight: bold; color: #28231e; line-height: 1.5; }
+    .modal-actions { display: flex; gap: 12px; }
+    .modal-btn {
+      flex: 1; padding: 16px 12px; border: none; border-radius: 8px; font-size: 1.1rem;
+      cursor: pointer; font-weight: bold; transition: 0.2s;
+    }
+    .btn-cancel { background: #e0e0e0; color: #555; }
+    .btn-cancel:hover { background: #d0d0d0; }
+    .btn-confirm { background: #5a6452; color: #fff; }
+    .btn-confirm:hover { background: #4a5442; }
   </style>
 </head>
 <body>
@@ -60,6 +82,17 @@
     
     <div id="message"></div>
     <div id="productList" class="product-list"></div>
+  </div>
+
+  <!-- 確認用モーダル -->
+  <div id="confirmModal" class="modal-overlay">
+    <div class="modal-content">
+      <p id="confirmText">この商品を〇〇に変更しますか？</p>
+      <div class="modal-actions">
+        <button class="modal-btn btn-cancel" onclick="closeConfirmModal()">キャンセル</button>
+        <button class="modal-btn btn-confirm" id="confirmBtn">変更する</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -149,25 +182,46 @@
             <span class="status-badge ${statusClass}">${statusText}</span>
           </div>
           <div class="action-buttons">
-            <button class="btn-action btn-hide" onclick="updateStatus('${p.id}', 'hide')">非表示にする</button>
-            <button class="btn-action btn-soldout" onclick="updateStatus('${p.id}', 'soldout')">SOLD OUTにする</button>
-            <button class="btn-action btn-relist" onclick="updateStatus('${p.id}', 'relist')">再販売する</button>
+            <button class="btn-action btn-hide" onclick="openConfirmModal('${p.id}', 'hide')">非表示にする</button>
+            <button class="btn-action btn-soldout" onclick="openConfirmModal('${p.id}', 'soldout')">SOLD OUTにする</button>
+            <button class="btn-action btn-relist" onclick="openConfirmModal('${p.id}', 'relist')">再販売する</button>
           </div>
         `;
         container.appendChild(card);
       });
     }
 
-    function updateStatus(productId, actionType) {
+    let currentAction = { productId: null, actionType: null };
+
+    function openConfirmModal(productId, actionType) {
       let actionName = "";
-      if (actionType === 'hide') actionName = "「非表示」";
-      if (actionType === 'soldout') actionName = "「SOLD OUT」";
-      if (actionType === 'relist') actionName = "「再販売」";
+      if (actionType === 'hide') actionName = "非表示";
+      if (actionType === 'soldout') actionName = "SOLD OUT";
+      if (actionType === 'relist') actionName = "再販売";
       
-      if (!confirm(`この商品を${actionName}に変更します。よろしいですか？`)) {
-        return;
-      }
+      document.getElementById('confirmText').textContent = `この商品を${actionName}に変更しますか？`;
+      currentAction = { productId, actionType };
       
+      document.getElementById('confirmModal').classList.add('active');
+    }
+
+    function closeConfirmModal() {
+      document.getElementById('confirmModal').classList.remove('active');
+      currentAction = { productId: null, actionType: null };
+    }
+
+    document.getElementById('confirmBtn').addEventListener('click', function() {
+      if (!currentAction.productId || !currentAction.actionType) return;
+      
+      const pId = currentAction.productId;
+      const aType = currentAction.actionType;
+      
+      // モーダルを閉じてから更新処理へ進む
+      closeConfirmModal();
+      executeProductUpdate(pId, aType);
+    });
+
+    function executeProductUpdate(productId, actionType) {
       const token = document.getElementById('adminToken').value;
       if (!token) return;
       
